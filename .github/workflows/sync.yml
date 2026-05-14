@@ -1,27 +1,41 @@
-name: Handle Org-Wide Issue Events
+name: Sync Org Issues to Project
 
 on:
-  repository_dispatch:
-    types: [org_issue_created] # Listens for the custom webhook trigger
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      since:
+        description: 'Sync issues created after this ISO 8601 timestamp (default: 15 min ago)'
+        required: false
 
 jobs:
-  add-to-project:
+  sync-issues:
     runs-on: ubuntu-latest
     steps:
-      - name: Add Issue to Project Board
+      - name: Add new org issues to project
         env:
           GH_TOKEN: ${{ secrets.PROJECT_SYNC_TOKEN }}
-          ORG_NAME: "aintropy-ai"
-          PROJECT_NUM: "1"
-          # Extract the specific issue URL sent by the organization webhook payload
-          ISSUE_URL: ${{ github.event.client_payload.issue_url }}
-          ISSUE_STATE: ${{ github.event.client_payload.issue_state }}
         run: |
-          # Only process if the issue was just opened
-          if [ "$ISSUE_STATE" = "opened" ] && [ -n "$ISSUE_URL" ]; then
-            echo "Processing new issue: $ISSUE_URL"
-            gh project item-add "$PROJECT_NUM" --owner "$ORG_NAME" --url "$ISSUE_URL"
-          else
-            echo "Skipping event. State is: $ISSUE_STATE"
+          SINCE="${{ github.event.inputs.since }}"
+          if [ -z "$SINCE" ]; then
+            SINCE=$(date -u -d '15 minutes ago' +%Y-%m-%dT%H:%M:%SZ)
           fi
 
+          echo "Searching org:aintropy-ai for issues created since $SINCE"
+
+          URLS=$(gh api \
+            "search/issues?q=org:aintropy-ai+is:issue+created:>${SINCE}&sort=created&order=desc&per_page=100" \
+            --jq '.items[].html_url')
+
+          if [ -z "$URLS" ]; then
+            echo "No new issues found."
+            exit 0
+          fi
+
+          while IFS= read -r url; do
+            echo "Adding: $url"
+            gh project item-add 1 --owner aintropy-ai --url "$url" \
+              && echo "  -> added" \
+              || echo "  -> skipped (already in project or transient error)"
+          done <<< "$URLS"
