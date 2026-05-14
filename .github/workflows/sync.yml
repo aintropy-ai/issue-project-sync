@@ -1,0 +1,27 @@
+name: Handle Org-Wide Issue Events
+
+on:
+  repository_dispatch:
+    types: [org_issue_created] # Listens for the custom webhook trigger
+
+jobs:
+  add-to-project:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add Issue to Project Board
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_SYNC_TOKEN }}
+          ORG_NAME: "aintropy-ai"
+          PROJECT_NUM: "1"
+          # Extract the specific issue URL sent by the organization webhook payload
+          ISSUE_URL: ${{ github.event.client_payload.issue_url }}
+          ISSUE_STATE: ${{ github.event.client_payload.issue_state }}
+        run: |
+          # Only process if the issue was just opened
+          if [ "$ISSUE_STATE" = "opened" ] && [ -n "$ISSUE_URL" ]; then
+            echo "Processing new issue: $ISSUE_URL"
+            gh project item-add "$PROJECT_NUM" --owner "$ORG_NAME" --url "$ISSUE_URL"
+          else
+            echo "Skipping event. State is: $ISSUE_STATE"
+          fi
+
